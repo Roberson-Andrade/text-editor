@@ -145,7 +145,7 @@ class Editor {
 	 */
 	#drawRows(appendBuffer) {
 		for (let y = 0; y < this.rows; y++) {
-			if (y === this.rows / 3) {
+			if (y === Math.floor(this.rows / 3)) {
 				let padding = (this.columns - this.welcomeMsg.length) / 2;
 
 				if (padding > 0) {
