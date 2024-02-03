@@ -1,4 +1,7 @@
+import { createReadStream } from 'node:fs';
 import * as readline from 'node:readline';
+
+const filename = process.argv[2];
 
 const EDITOR_KEY = {
 	ARROW_UP: 'w',
@@ -7,13 +10,18 @@ const EDITOR_KEY = {
 	ARROW_RIGHT: 'd',
 	PAGE_UP: '\x1B[5~',
 	PAGE_DOWN: '\x1B[6~',
+	HOME: '\x1B[7~',
+	END: '\x1B[8~',
+	DELETE: '\x1B[3~',
 };
 
 class Editor {
 	welcomeMsg = 'Kilo editor in node.js - version 0.0.0';
+	rows = [];
+	numRows = 0;
 
-	columns = 0;
-	rows = 0;
+	TTYColumns = 0;
+	TTYRows = 0;
 
 	cursorX = 0;
 	cursorY = 0;
@@ -21,8 +29,9 @@ class Editor {
 	/**
 	 * Initializes the editor by setting up input events and refreshing the screen.
 	 */
-	init() {
+	async init() {
 		this.#enableRawMode();
+		await this.#openFile();
 		this.#updateWindowSize();
 		this.#refreshScreen();
 		this.#editorProcessKeypress();
@@ -55,6 +64,16 @@ class Editor {
 				return EDITOR_KEY.ARROW_RIGHT;
 			case '\x1B[D':
 				return EDITOR_KEY.ARROW_LEFT;
+			case '\x1B[H':
+			case '\x1B[1~':
+			case '\x1B[7~':
+			case '\x1B[OH':
+				return EDITOR_KEY.HOME;
+			case '\x1B[4~':
+			case '\x1B[8~':
+			case '\x1B[F':
+			case '\x1B[OF':
+				return EDITOR_KEY.END;
 			default:
 				return key.sequence;
 		}
@@ -75,6 +94,8 @@ class Editor {
 				case EDITOR_KEY.ARROW_RIGHT:
 				case EDITOR_KEY.PAGE_UP:
 				case EDITOR_KEY.PAGE_DOWN:
+				case EDITOR_KEY.HOME:
+				case EDITOR_KEY.END:
 					this.#editorMoveCursor(sequence);
 					break;
 
@@ -95,7 +116,7 @@ class Editor {
 	}
 
 	/**
-	 *
+	 * Moves the cursor in the specified direction.
 	 * @param {string} key
 	 */
 	#editorMoveCursor(key) {
@@ -104,19 +125,25 @@ class Editor {
 				if (this.cursorX > 0) this.cursorX--;
 				break;
 			case EDITOR_KEY.ARROW_RIGHT:
-				if (this.cursorX < this.columns - 1) this.cursorX++;
+				if (this.cursorX < this.TTYColumns - 1) this.cursorX++;
 				break;
 			case EDITOR_KEY.ARROW_UP:
 				if (this.cursorY > 0) this.cursorY--;
 				break;
 			case EDITOR_KEY.ARROW_DOWN:
-				if (this.cursorY < this.rows - 1) this.cursorY++;
+				if (this.cursorY < this.TTYRows - 1) this.cursorY++;
 				break;
 			case EDITOR_KEY.PAGE_UP:
 				this.cursorY = 0;
 				break;
 			case EDITOR_KEY.PAGE_DOWN:
-				this.cursorY = this.rows;
+				this.cursorY = this.TTYRows;
+				break;
+			case EDITOR_KEY.HOME:
+				this.cursorX = 0;
+				break;
+			case EDITOR_KEY.END:
+				this.cursorX = this.TTYColumns - 1;
 				break;
 		}
 	}
@@ -144,27 +171,32 @@ class Editor {
 	 * @param {string} appendBuffer
 	 */
 	#drawRows(appendBuffer) {
-		for (let y = 0; y < this.rows; y++) {
-			if (y === Math.floor(this.rows / 3)) {
-				let padding = (this.columns - this.welcomeMsg.length) / 2;
+		for (let y = 0; y < this.TTYRows; y++) {
+			if (y >= this.numRows) {
+				if (this.numRows === 0 && y === Math.floor(this.TTYRows / 3)) {
+					let padding = (this.TTYColumns - this.welcomeMsg.length) / 2;
 
-				if (padding > 0) {
+					if (padding > 0) {
+						appendBuffer += '~';
+						padding--;
+					}
+
+					while (padding-- > 0) {
+						appendBuffer += ' ';
+					}
+
+					appendBuffer += this.welcomeMsg;
+				} else {
 					appendBuffer += '~';
-					padding--;
 				}
-
-				while (padding-- > 0) {
-					appendBuffer += ' ';
-				}
-
-				appendBuffer += this.welcomeMsg;
 			} else {
-				appendBuffer += '~';
+				console.log(this.rows);
+				appendBuffer += this.rows;
 			}
 
 			appendBuffer += '\x1b[K'; // Clear the line
 
-			if (y < this.rows - 1) {
+			if (y < this.TTYRows - 1) {
 				appendBuffer += '\r\n';
 			}
 		}
@@ -174,11 +206,38 @@ class Editor {
 
 	/**
 	 * Updates the columns and rows variables based on the current terminal size.
-	 * @param {string} appendBuffer
 	 */
 	#updateWindowSize() {
-		this.columns = process.stdout.columns;
-		this.rows = process.stdout.rows;
+		this.TTYColumns = process.stdout.columns;
+		this.TTYRows = process.stdout.rows;
+	}
+
+	/*** file i/o ***/
+
+	async #openFile() {
+		if (!filename) return;
+
+		const rl = readline.createInterface({
+			input: createReadStream(filename),
+		});
+
+		const line = await new Promise((resolve) => {
+			rl.once('line', (line) => {
+				resolve(line);
+			});
+		});
+
+		this.#appendRow(line);
+	}
+
+	/*** row operations ***/
+
+	/**
+	 * @param {string} line
+	 */
+	#appendRow(line) {
+		this.rows.push(line);
+		this.numRows++;
 	}
 }
 
